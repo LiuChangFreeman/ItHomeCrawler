@@ -182,7 +182,7 @@ queue=[]
 #下面填入新闻的id号，从87777到318888左右
 for i in range(238831,320000):
     queue.append(i)
-pool = threadpool.ThreadPool(1)
+pool = threadpool.ThreadPool(16)
 requests = threadpool.makeRequests(SearchComment, queue)
 [pool.putRequest(req) for req in requests]
 pool.wait()
