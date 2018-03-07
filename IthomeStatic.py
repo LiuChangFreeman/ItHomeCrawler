@@ -5,12 +5,11 @@ import MySQLdb
 import urllib2
 import urllib
 import time
+import json
 import threading
 import threadpool
 def ConnectMySql():#在这里改成你的MySql连接信息
-    conn = MySQLdb.connect(host='localhost', user='root', passwd='545269649', port=3306, charset='utf8')
-    cursor = conn.cursor()
-    return [conn,cursor]
+    return MySQLdb.connect(host='localhost', user='root', passwd='545269649', port=3306, charset='utf8')
 emoji_pattern = re.compile(
     u"(\ud83d[\ude00-\ude4f])|" 
     u"(\ud83c[\udf00-\uffff])|"  
@@ -18,6 +17,7 @@ emoji_pattern = re.compile(
     u"(\ud83d[\ude80-\udeff])|"  
     u"(\ud83c[\udde0-\uddff])" 
     "+", flags=re.UNICODE)
+database='ithome'
 def remove_emoji(text):
     return emoji_pattern.sub(r'', text)
 def GetUrl(url):
@@ -49,10 +49,9 @@ def gethash(url):
     return hash[0]
 def SearchComment(page):
   SearchHotComment(page)
-  temp = ConnectMySql()
-  conn = temp[0]
-  cur = temp[1]
-  conn.select_db('ithome')
+  conn = ConnectMySql()
+  cur = conn.cursor()
+  conn.select_db(database)
   hash=gethash("https://dyn.ithome.com/comment/"+str(page))
   if hash is None:
       return
@@ -90,9 +89,9 @@ def SearchComment(page):
       temp = re.findall("<a title=.*(?=><img class=)", values)
       id=re.findall(u"(?<=<a title=\"软媒通行证数字ID：).+?(?=\")", values)
       commentid=re.findall("(?<=<a id=\"agree).+?(?=\")",values)
-      name=re.findall("(?<=</strong><strong class=\"nick\">"+ temp[0]+">).*(?=</a></strong>)",values)
+      name=re.findall("(?<=</strong><div class=\"nmp\"><span class=\"nick\">"+ temp[0]+">).+?(?=</a></span>)",values)
       if(len(name)==0):
-        name=re.findall(u"(?<=<strong class=\"nick\"><a title=\"软媒通行证数字ID："+id[0]+"\" target=\"_blank\" href=\"http://quan.ithome.com/user/"+id[0]+"\">).+?(?=</a></strong>)",values)
+        name=re.findall(u"(?<=<span class=\"nick\"><a title=\"软媒通行证数字ID："+id[0]+"\" target=\"_blank\" href=\"http://quan.ithome.com/user/"+id[0]+"\">).+?(?=</a></span>)",values)
       content=re.findall("(?<=<div class=\"comm\"><p>).+?(?=</p>)",values)
       pri = re.findall("(?<=<a title=).+?(?=<span class=\"posandtime\">)", values)
       device = re.findall("(?<=ithome/download/\">).+?(?=</a></span>)", pri[0])
@@ -131,11 +130,11 @@ def SearchComment(page):
                   tem = re.findall("<a title=.*(?=><img class=)", value)
                   id = re.findall(u"(?<=<a title=\"软媒通行证数字ID：).+?(?=\")", value)
                   commentid = re.findall("(?<=<a id=\"agree).+?(?=\")", value)
-                  name = re.findall("(?<=</strong><strong class=\"nick\">" + tem[0] + ">).*(?=</a></strong>)", value)
+                  name = re.findall("(?<=</strong><div class=\"nmp\"><span class=\"nick\">" + tem[0] + ">).+?(?=</a></span>)", value)
                   if (len(name) == 0):
-                      name = re.findall(u"(?<=<strong class=\"nick\"><a title=\"软媒通行证数字ID：" + id[
+                      name = re.findall(u"(?<=<span class=\"nick\"><a title=\"软媒通行证数字ID：" + id[
                           0] + "\" target=\"_blank\" href=\"http://quan.ithome.com/user/" + id[
-                                            0] + "\">).+?(?=</a></strong>)", value)
+                                            0] + "\">).+?(?=</a></span>)", value)
                   content = re.findall("(?<=re_comm\"><p>).+?(?=</p>)", value)
                   pri = re.findall("(?<=<a title=).+?(?=<span class=\"posandtime\">)", value)
                   device = re.findall("(?<=ithome/download/\">).+?(?=</a></span>)", pri[0])
@@ -175,30 +174,36 @@ def SearchComment(page):
   except:
    return
 def SearchHotComment(page):
-    temp = ConnectMySql()
-    conn = temp[0]
-    cur = temp[1]
-    conn.select_db('ithome')
-    url = "https://dyn.ithome.com/ithome/getajaxdata.aspx"
-    data = {
-    'newsID': str(page),
-    'type':'hotcomment'
-    }
-    result=PostUrl(url,data)
-    if(result is None):
-     return
-    result=result.decode('utf-8')
-    comments=re.findall("(?<=<li class=\"entry\").+?(?=</div></div></li>)",result)
-    for values in comments:
-     try:
-      id=re.findall(u"(?<=<a title=\"软媒通行证数字ID：).+?(?=\")", values)[0]
-      name = re.findall(u"(?<=<strong class=\"nick\"><a title=\"软媒通行证数字ID："+id+"\" target=\"_blank\" href=\"http://quan.ithome.com/user/"+id+"\">).+?(?=</a></strong>)", values)
-      sql = "insert into hotcomment VALUES (%s)"
-      sqldata=(name[0])
-      cur.execute(sql,sqldata)
-      conn.commit()
-     except:
-      continue
+    conn = ConnectMySql()
+    cur = conn.cursor()
+    conn.select_db(database)
+    db=True
+    pid=1
+    while(db):
+        url = "https://dyn.ithome.com/ithome/getajaxdata.aspx"
+        data = {
+        'newsID': str(page),
+        'pid':str(pid),
+        'type':'hotcomment'
+        }
+        result=PostUrl(url,data)
+        if(result is None):
+         return
+        result=result.decode('utf-8')
+        jsondata=json.loads(result)
+        db=jsondata['db']
+        result=jsondata['html']
+        comments=re.findall("(?<=<li class=\"entry\").+?(?=</div></div></li>)",result)
+        for values in comments:
+         try:
+          id=re.findall(u"(?<=<a title=\"软媒通行证数字ID：).+?(?=\")", values)[0]
+          name = re.findall(u"(?<=<span class=\"nick\"><a title=\"软媒通行证数字ID："+id+"\" target=\"_blank\" href=\"http://quan.ithome.com/user/"+id+"\">).+?(?=</a></span>)", values)
+          sql = "insert into hotcomment VALUES (%s)"%('\''+name[0]+'\'')
+          cur.execute(sql)
+          conn.commit()
+         except:
+          continue
+        pid=pid+1
     return
 class threadsearch(threading.Thread):
     def __init__(self,que):
@@ -214,7 +219,7 @@ class threadsearch(threading.Thread):
 reload(sys)
 sys.setdefaultencoding('utf-8')
 queue=[]
-for i in range(221111,337532):#这里改成你要爬的文章范围，从网页的url上获取
+for i in range(221111,350000):#这里改成你要爬的文章范围，从网页的url上获取
     queue.append(i)
 pool = threadpool.ThreadPool(8)#使用的线程数，推荐默认值
 requests = threadpool.makeRequests(SearchComment, queue)
