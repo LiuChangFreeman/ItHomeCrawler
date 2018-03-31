@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 import re
-import sys
+import os
 import MySQLdb
-import urllib2
-import urllib
+import requests
+from bs4 import BeautifulSoup
 import time
 import json
 import threading
@@ -17,46 +17,33 @@ emoji_pattern = re.compile(
     u"(\ud83d[\ude80-\udeff])|"  
     u"(\ud83c[\udde0-\uddff])" 
     "+", flags=re.UNICODE)
-database='ithome'
 def remove_emoji(text):
     return emoji_pattern.sub(r'', text)
-def GetUrl(url):
- try:
-  handler=urllib2.HTTPCookieProcessor()
-  opener=urllib2.build_opener(handler)
-  request = urllib2.Request(url)
-  response_data = opener.open(request)
-  result = response_data.read()
-  return result
- except:
-  return
-def PostUrl(url,post_data):
- try:
-  handler=urllib2.HTTPCookieProcessor()
-  opener=urllib2.build_opener(handler)
-  post_data_urlencode = urllib.urlencode(post_data)
-  request = urllib2.Request(url = url,data =post_data_urlencode)
-  response_data=opener.open(request)
-  result = response_data.read()
-  return result
- except:
-  return
+path = "D:/Crawler/ithome/data/"
+database='Ithome'
 def gethash(url):
-    result=GetUrl(url)
+    r=requests.get(url)
+    result=r.text
     if result is None:
         return
     hash=re.findall("(?<=id=\"hash\" value=\").+?(?=\")",result)
     return hash[0]
 def SearchComment(page):
+  if not os.path.exists(path+ str(page)):
+      os.mkdir(path+ str(page))
   SearchHotComment(page)
+  count = 0
   conn = ConnectMySql()
   cur = conn.cursor()
+  cur.execute('SET NAMES utf8mb4')
+  cur.execute("SET CHARACTER SET utf8mb4")
+  cur.execute("SET character_set_connection=utf8mb4")
   conn.select_db(database)
-  hash=gethash("https://dyn.ithome.com/comment/"+str(page))
+  hash=gethash("https://dyn.Ithome.com/comment/"+str(page))
   if hash is None:
       return
   i=1
-  url = "https://dyn.ithome.com/ithome/getajaxdata.aspx"
+  url = "https://dyn.Ithome.com/Ithome/getajaxdata.aspx"
   data = {
     'newsID': str(page),
     'hash':hash,
@@ -64,13 +51,13 @@ def SearchComment(page):
     'page':str(i),
     'order':'false'
     }
-  result=PostUrl(url,data)
+  r = requests.post(url,data=data)
+  result=r.text
   if(result is None):
    return
-  result=result.decode('utf-8')
-  comments=re.findall("(?<=<li class=\"entry\">).+?(?=</li>)",result)
+  comments=re.findall("<li class=\"entry\">.+?</li>",result)
   try:
-   while(comments[0]):
+   while(len(comments)>0):
     data = {
     'newsID': str(page),
     'hash':hash,
@@ -78,100 +65,96 @@ def SearchComment(page):
     'page':str(i),
     'order':'false'
     }
-    result=PostUrl(url,data)
+    r = requests.post(url, data=data)
+    result = r.text
+    with open(path+ str(page)+"/"+str(page)+"-{}.html".format(str(i)),"w") as file:
+        file.write(result.encode("utf-8"))
     if(result is None):
      return
-    result=result.decode('utf-8')
-    comments=re.findall("(?<=<li class=\"entry\">).+?(?=\"></div></div></li>)",result)
-    cnt=len(comments)+1
-    for values in comments:
+    comments = re.findall("<li class=\"entry\">.+?</li>", result)
+    for comment in comments:
      try:
-      temp = re.findall("<a title=.*(?=><img class=)", values)
-      id=re.findall(u"(?<=<a title=\"软媒通行证数字ID：).+?(?=\")", values)
-      commentid=re.findall("(?<=<a id=\"agree).+?(?=\")",values)
-      name=re.findall("(?<=</strong><div class=\"nmp\"><span class=\"nick\">"+ temp[0]+">).+?(?=</a></span>)",values)
-      if(len(name)==0):
-        name=re.findall(u"(?<=<span class=\"nick\"><a title=\"软媒通行证数字ID："+id[0]+"\" target=\"_blank\" href=\"http://quan.ithome.com/user/"+id[0]+"\">).+?(?=</a></span>)",values)
-      content=re.findall("(?<=<div class=\"comm\"><p>).+?(?=</p>)",values)
-      pri = re.findall("(?<=<a title=).+?(?=<span class=\"posandtime\">)", values)
-      device = re.findall("(?<=ithome/download/\">).+?(?=</a></span>)", pri[0])
-      position=re.findall(u"(?<=class=\"posandtime\">IT之家).+?(?=网友)",values)
-      avator=re.findall("(?<='\" src=\"//).+?(?=\")",values)
-      favor=re.findall(u"(?<=>支持\().+?(?=\))",values)
-      against = re.findall(u"(?<=>反对\().+?(?=\))", values)
-      floor= re.findall(u"(?<=class=\"p_floor\">).+?(?=楼)", values)
-      sendtime=re.findall(u"(?<=&nbsp;).+?(?=</span>)", values)
+      count+=1
+      if count==305:
+          pass
+      comment=BeautifulSoup(comment)
+      id=comment.select_one(".nick").find("a")["title"][10:]
+      commentid=comment.select_one(".comm_reply").select_one(".s")["id"].replace("agree","")
+      name=comment.select_one(".nick").find("a").text
+      content=comment.select_one(".comm").find("p").text
+      nmp=comment.select_one(".nmp")
+      device="null"
+      position="null"
+      sendtime="null"
+      if len(nmp.find_all("span"))>2:
+        device = comment.select_one(".nmp").find_all("span")[1].find("a").text
+      pri = comment.select_one(".posandtime")
+      if pri!=None:
+        pri = pri.text
+        position=re.findall(u"(?<=IT之家).+?(?=网友)",pri)
+        if len(position)>0:
+            position = position[0]
+        else:
+            position="null"
+        sendtime=pri[len(pri)-18:]
+      avator=comment.select_one(".headerimage")["src"][2:]
+      favor=comment.select_one(".comm_reply").select_one(".s").text
+      favor=re.findall(u"(?<=支持\()(.+?)(?=\))",favor)[0]
+      against = comment.select_one(".comm_reply").select_one(".a").text
+      against = re.findall(u"(?<=反对\()(.+?)(?=\))", against)[0]
+      floor= comment.select_one(".p_floor").text.replace(u"楼","")
       sql = "insert into comments VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
-      if(len(device)>0):
-       device=device[0]
-      else:
-        device="null"
-      if(len(floor)>0):
-        floor=floor[0]
-      else:
-        floor=str(cnt-1)
-      cnt = cnt - 1
-      if(len(position)>0):
-        position=position[0]
-      else:
-        position="null"
-      if(len(sendtime)>0):
-          sendtime=sendtime[0]
-      else:
-          sendtime="null"
-      sqldata = (id[0],commentid[0],name[0],content[0], device,position,avator[0],int(favor[0], 10), int(against[0], 10),page,floor,sendtime,time.strftime('%Y-%m-%d  %H:%M:%S',time.localtime()))
+      sqldata = (id,commentid,name,remove_emoji(content),device,position,avator,int(favor, 10), int(against, 10),page,floor,sendtime,time.strftime('%Y-%m-%d  %H:%M:%S',time.localtime()))
       cur.execute(sql, sqldata)
       conn.commit()
       major=floor
-      temp=re.findall("class=\"gh\".+?(?=></span></div></div>)",values)
-      if(len(temp)>0):
-          for value in temp:
+      reply=comment.select_one(".reply")
+      if(reply!=None):
+          if(major=="248"):
+              pass
+          details=reply.select(".gh")
+          for value in details:
               try:
-                  tem = re.findall("<a title=.*(?=><img class=)", value)
-                  id = re.findall(u"(?<=<a title=\"软媒通行证数字ID：).+?(?=\")", value)
-                  commentid = re.findall("(?<=<a id=\"agree).+?(?=\")", value)
-                  name = re.findall("(?<=</strong><div class=\"nmp\"><span class=\"nick\">" + tem[0] + ">).+?(?=</a></span>)", value)
-                  if (len(name) == 0):
-                      name = re.findall(u"(?<=<span class=\"nick\"><a title=\"软媒通行证数字ID：" + id[
-                          0] + "\" target=\"_blank\" href=\"http://quan.ithome.com/user/" + id[
-                                            0] + "\">).+?(?=</a></span>)", value)
-                  content = re.findall("(?<=re_comm\"><p>).+?(?=</p>)", value)
-                  pri = re.findall("(?<=<a title=).+?(?=<span class=\"posandtime\">)", value)
-                  device = re.findall("(?<=ithome/download/\">).+?(?=</a></span>)", pri[0])
-                  position = re.findall(u"(?<=class=\"posandtime\">IT之家).+?(?=网友)", value)
-                  avator = re.findall("(?<='\" src=\"//).+?(?=\")", value)
-                  favor = re.findall(u"(?<=>支持\().+?(?=\))", value)
-                  against = re.findall(u"(?<=>反对\().+?(?=\))", value)
-                  floor = re.findall(u"(?<=class=\"p_floor\">).+?(?=#)", value)
-                  sendtime = re.findall(u"(?<=&nbsp;).+?(?=</span>)", values)
+                  id = value.select_one(".nick").find("a")["title"][10:]
+                  commentid = value.select_one(".comm_reply").select_one(".s")["id"].replace("agree", "")
+                  name = value.select_one(".nick").find("a").text
+                  content = value.select_one(".re_comm").find("p").text
+                  nmp = value.select_one(".nmp")
+                  device = "null"
+                  position = "null"
+                  sendtime = "null"
+                  if len(nmp.find_all("span")) > 2:
+                      device = value.select_one(".nmp").find_all("span")[1].find("a").text
+                  pri = value.select_one(".posandtime")
+                  if pri != None:
+                      pri = pri.text
+                      position = re.findall(u"(?<=IT之家).+?(?=网友)", pri)
+                      if len(position) > 0:
+                          position = position[0]
+                      else:
+                          position = "null"
+                      sendtime = pri[len(pri) - 18:]
+                  avator = value.select_one(".headerimage")["src"][2:]
+                  favor = value.select_one(".comm_reply").select_one(".s").text
+                  favor = re.findall(u"(?<=支持\()(.+?)(?=\))", favor)[0]
+                  against = value.select_one(".comm_reply").select_one(".a").text
+                  against = re.findall(u"(?<=反对\()(.+?)(?=\))", against)[0]
+                  floor = major+"|"+value.select_one(".p_floor").text.replace(u"楼", "")
                   sql = "insert into comments VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
-                  if (len(device) > 0):
-                      device = device[0]
-                  else:
-                      device = "null"
-                  if (len(floor) > 0):
-                      floor =major+"#"+floor[0]
-                  else:
-                      floor = "null"
-                  if (len(position) > 0):
-                      position = position[0]
-                  else:
-                      position = "null"
-                  if (len(sendtime) > 0):
-                      sendtime = sendtime[0]
-                  else:
-                      sendtime = "null"
-                  sqldata = (id[0], commentid[0], name[0],content[0], device, position, avator[0],
-                             int(favor[0], 10), int(against[0], 10), page, floor, sendtime,
+                  sqldata = (id, commentid, name,remove_emoji(content), device, position, avator,
+                             int(favor, 10), int(against, 10), page, floor, sendtime,
                              time.strftime('%Y-%m-%d  %H:%M:%S', time.localtime()))
                   cur.execute(sql, sqldata)
                   conn.commit()
               except:
+               print(major)
                continue
      except:
+      print(count)
       continue
     i=i+1
   except:
+   print(page)
    return
 def SearchHotComment(page):
     conn = ConnectMySql()
@@ -180,29 +163,31 @@ def SearchHotComment(page):
     db=True
     pid=1
     while(db):
-        url = "https://dyn.ithome.com/ithome/getajaxdata.aspx"
+        url = "https://dyn.Ithome.com/Ithome/getajaxdata.aspx"
         data = {
         'newsID': str(page),
         'pid':str(pid),
         'type':'hotcomment'
         }
-        result=PostUrl(url,data)
+        r = requests.post(url, data=data)
+        result = r.text
+        with open(path+ str(page)+"/"+str(page) + "-{}-hot.html".format(str(pid)), "w") as file:
+            file.write(result.encode("utf-8"))
         if(result is None):
          return
-        result=result.decode('utf-8')
         jsondata=json.loads(result)
         db=jsondata['db']
         result=jsondata['html']
-        comments=re.findall("(?<=<li class=\"entry\").+?(?=</div></div></li>)",result)
-        for values in comments:
-         try:
-          id=re.findall(u"(?<=<a title=\"软媒通行证数字ID：).+?(?=\")", values)[0]
-          name = re.findall(u"(?<=<span class=\"nick\"><a title=\"软媒通行证数字ID："+id+"\" target=\"_blank\" href=\"http://quan.ithome.com/user/"+id+"\">).+?(?=</a></span>)", values)
-          sql = "insert into hotcomment VALUES (%s)"%('\''+name[0]+'\'')
-          cur.execute(sql)
-          conn.commit()
-         except:
-          continue
+        data=BeautifulSoup(result)
+        nicks=data.select(".nick")
+        for nick in nicks:
+            try:
+                name=nick.text
+                sql = "insert into hotcomment VALUES (%s)"%('\''+name+'\'')
+                cur.execute(sql)
+                conn.commit()
+            except:
+                continue
         pid=pid+1
     return
 class threadsearch(threading.Thread):
@@ -216,12 +201,10 @@ class threadsearch(threading.Thread):
                 SearchComment(id)
             else:
                 break
-reload(sys)
-sys.setdefaultencoding('utf-8')
-queue=[]
-for i in range(221111,350000):#这里改成你要爬的文章范围，从网页的url上获取
-    queue.append(i)
-pool = threadpool.ThreadPool(8)#使用的线程数，推荐默认值
-requests = threadpool.makeRequests(SearchComment, queue)
-[pool.putRequest(req) for req in requests]
-pool.wait()
+if __name__=='__main__':
+    queue=[]
+    for i in range(221111,353195):#这里改成你要爬的文章范围，从网页的url上获取
+        queue.append(i)
+    pool = threadpool.ThreadPool(8)#使用的线程数，推荐默认值
+    [pool.putRequest(req) for req in request]
+    pool.wait()
