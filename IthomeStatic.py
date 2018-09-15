@@ -9,7 +9,7 @@ import json
 import threading
 import threadpool
 def ConnectMySql():#在这里改成你的MySql连接信息
-    return MySQLdb.connect(host='localhost', user='root', passwd='545269649', port=3306, charset='utf8')
+    return MySQLdb.connect(host='localhost', user='root', passwd='', port=3306, charset='utf8')
 emoji_pattern = re.compile(
     u"(\ud83d[\ude00-\ude4f])|" 
     u"(\ud83c[\udf00-\uffff])|"  
