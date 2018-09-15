@@ -36,6 +36,7 @@ CREATE TABLE `comments` (
   `floor` varchar(12) DEFAULT NULL,
   `time` varchar(48) DEFAULT NULL,
   `updatetime` varchar(48) DEFAULT NULL,
+  `apptype` varchar(128) DEFAULT NULL,
   KEY `name` (`name`),
   KEY `name_2` (`name`),
   KEY `name_3` (`name`),

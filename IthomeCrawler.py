@@ -19,18 +19,18 @@ emoji_pattern = re.compile(
     "+", flags=re.UNICODE)
 def remove_emoji(text):
     return emoji_pattern.sub(r'', text)
-path = "D:/Crawler/ithome/data/"
-database='Ithome'
+database='ithome'
 def gethash(url):
     r=requests.get(url)
     result=r.text
     if result is None:
         return
-    hash=re.findall("(?<=id=\"hash\" value=\").+?(?=\")",result)
+    hash=re.findall("(?<= var ch11 = \').+?(?=\')",result)
     return hash[0]
+def gettime():
+    return time.strftime('%m-%d/%H:%M:%S', time.localtime())
 def SearchComment(page):
-  if not os.path.exists(path+ str(page)):
-      os.mkdir(path+ str(page))
+  print("{}-{}".format(gettime(), page))
   SearchHotComment(page)
   count = 0
   conn = ConnectMySql()
@@ -67,17 +67,15 @@ def SearchComment(page):
     }
     r = requests.post(url, data=data)
     result = r.text
-    with open(path+ str(page)+"/"+str(page)+"-{}.html".format(str(i)),"w") as file:
-        file.write(result.encode("utf-8"))
     if(result is None):
      return
     comments = re.findall("<li class=\"entry\">.+?</li>", result)
+    total=[]
     for comment in comments:
      try:
       count+=1
-      if count==305:
-          pass
-      comment=BeautifulSoup(comment)
+      apptype="null"
+      comment=BeautifulSoup(comment,"html.parser")
       id=comment.select_one(".nick").find("a")["title"][10:]
       commentid=comment.select_one(".comm_reply").select_one(".s")["id"].replace("agree","")
       name=comment.select_one(".nick").find("a").text
@@ -88,6 +86,7 @@ def SearchComment(page):
       sendtime="null"
       if len(nmp.find_all("span"))>2:
         device = comment.select_one(".nmp").find_all("span")[1].find("a").text
+        apptype = " ".join(comment.select_one(".nmp").find_all("span")[1].attrs["class"])
       pri = comment.select_one(".posandtime")
       if pri!=None:
         pri = pri.text
@@ -103,18 +102,15 @@ def SearchComment(page):
       against = comment.select_one(".comm_reply").select_one(".a").text
       against = re.findall(u"(?<=反对\()(.+?)(?=\))", against)[0]
       floor= comment.select_one(".p_floor").text.replace(u"楼","")
-      sql = "insert into comments VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
-      sqldata = (id,commentid,name,remove_emoji(content),device,position,avator,int(favor, 10), int(against, 10),page,floor,sendtime,time.strftime('%Y-%m-%d  %H:%M:%S',time.localtime()))
-      cur.execute(sql, sqldata)
-      conn.commit()
+      sqldata = (id,commentid,name,remove_emoji(content),device,position,avator,int(favor, 10), int(against, 10),page,floor,sendtime,time.strftime('%Y-%m-%d  %H:%M:%S',time.localtime()),apptype)
+      total.append(sqldata)
       major=floor
       reply=comment.select_one(".reply")
       if(reply!=None):
-          if(major=="248"):
-              pass
           details=reply.select(".gh")
           for value in details:
               try:
+                  apptype = "null"
                   id = value.select_one(".nick").find("a")["title"][10:]
                   commentid = value.select_one(".comm_reply").select_one(".s")["id"].replace("agree", "")
                   name = value.select_one(".nick").find("a").text
@@ -125,6 +121,7 @@ def SearchComment(page):
                   sendtime = "null"
                   if len(nmp.find_all("span")) > 2:
                       device = value.select_one(".nmp").find_all("span")[1].find("a").text
+                      apptype=" ".join(value.select_one(".nmp").find_all("span")[1].attrs["class"])
                   pri = value.select_one(".posandtime")
                   if pri != None:
                       pri = pri.text
@@ -140,18 +137,26 @@ def SearchComment(page):
                   against = value.select_one(".comm_reply").select_one(".a").text
                   against = re.findall(u"(?<=反对\()(.+?)(?=\))", against)[0]
                   floor = major+"|"+value.select_one(".p_floor").text.replace(u"楼", "")
-                  sql = "insert into comments VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
                   sqldata = (id, commentid, name,remove_emoji(content), device, position, avator,
                              int(favor, 10), int(against, 10), page, floor, sendtime,
-                             time.strftime('%Y-%m-%d  %H:%M:%S', time.localtime()))
-                  cur.execute(sql, sqldata)
-                  conn.commit()
-              except:
-               print(major)
-               continue
-     except:
-      print(count)
-      continue
+                             time.strftime('%Y-%m-%d  %H:%M:%S', time.localtime()),apptype)
+                  total.append(sqldata)
+              except Exception as e:
+                  with open("error.log", "a") as fd:
+                      fd.write("{} 进入第{}层楼中楼失败,文章:{}\n错误日志:{}\n".format(gettime(),major,page,e))
+                  continue
+     except Exception as e:
+         with open("error.log", "a") as fd:
+             fd.write("{} 进入第{}条评论失败,文章:{},页码:{}\n错误日志:{}\n".format(gettime(),count, page,i,e))
+         continue
+    try:
+        sql = "insert into comments VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+        cur.executemany(sql, total)
+        conn.commit()
+    except Exception as e:
+        with open("error.log", "a") as fd:
+            fd.write("{} 插入{}条评论记录失败,文章:{},页码:{}\n错误日志:{}\n".format(gettime(),len(total), page, i,e))
+        pass
     i=i+1
   except:
    print(page)
@@ -162,32 +167,33 @@ def SearchHotComment(page):
     conn.select_db(database)
     db=True
     pid=1
+    hash = gethash("https://dyn.Ithome.com/comment/" + str(page))
     while(db):
         url = "https://dyn.Ithome.com/Ithome/getajaxdata.aspx"
         data = {
         'newsID': str(page),
+        'hash':hash,
         'pid':str(pid),
         'type':'hotcomment'
         }
         r = requests.post(url, data=data)
         result = r.text
-        with open(path+ str(page)+"/"+str(page) + "-{}-hot.html".format(str(pid)), "w") as file:
-            file.write(result.encode("utf-8"))
         if(result is None):
          return
         jsondata=json.loads(result)
         db=jsondata['db']
         result=jsondata['html']
-        data=BeautifulSoup(result)
+        data=BeautifulSoup(result,"html.parser")
         nicks=data.select(".nick")
-        for nick in nicks:
-            try:
-                name=nick.text
-                sql = "insert into hotcomment VALUES (%s)"%('\''+name+'\'')
-                cur.execute(sql)
-                conn.commit()
-            except:
-                continue
+        try:
+            sqldata=[(nick.text,) for nick in nicks]
+            sql = "insert into hotcomment VALUES (%s)"
+            cur.executemany(sql,sqldata)
+            conn.commit()
+        except Exception as e:
+            with open("error.log","a") as fd:
+                fd.write("插入{}条热评记录失败,文章:{}\n错误日志:{}\n".format(len(nicks),page,e))
+            pass
         pid=pid+1
     return
 class threadsearch(threading.Thread):
@@ -203,9 +209,12 @@ class threadsearch(threading.Thread):
                 break
 if __name__=='__main__':
     queue=[]
-    for i in range(221111,353195):#这里改成你要爬的文章范围，从网页的url上获取
+    for i in range(366293,383449):#这里改成你要爬的文章范围，从网页的url上获取
         queue.append(i)
     pool = threadpool.ThreadPool(8)#使用的线程数，推荐默认值
     request = threadpool.makeRequests(SearchComment, queue)
     [pool.putRequest(req) for req in request]
     pool.wait()
+    # for page in queue:
+    #     print("{}-{}".format(gettime(),page))
+    #     SearchComment(page)
