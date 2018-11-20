@@ -6,10 +6,10 @@ import requests
 from bs4 import BeautifulSoup
 import time
 import json
-import threading
 import threadpool
+database='ithome'
 def ConnectMySql():#在这里改成你的MySql连接信息
-    return MySQLdb.connect(host='localhost', user='root', passwd='545269649', port=3306, charset='utf8')
+    return MySQLdb.connect(host='', user='', passwd='', port=3306, charset='utf8')
 emoji_pattern = re.compile(
     u"(\ud83d[\ude00-\ude4f])|" 
     u"(\ud83c[\udf00-\uffff])|"  
@@ -19,7 +19,6 @@ emoji_pattern = re.compile(
     "+", flags=re.UNICODE)
 def remove_emoji(text):
     return emoji_pattern.sub(r'', text)
-database='ithome'
 def gethash(url):
     r=requests.get(url)
     result=r.text
@@ -30,7 +29,7 @@ def gethash(url):
 def gettime():
     return time.strftime('%m-%d/%H:%M:%S', time.localtime())
 def SearchComment(page):
-  print("{}-{}".format(gettime(), page))
+  print("{}-{}\n".format(gettime(), page))
   SearchHotComment(page)
   count = 0
   conn = ConnectMySql()
@@ -150,7 +149,7 @@ def SearchComment(page):
              fd.write("{} 进入第{}条评论失败,文章:{},页码:{}\n错误日志:{}\n".format(gettime(),count, page,i,e))
          continue
     try:
-        sql = "insert into comments VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+        sql = "replace into comments VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
         cur.executemany(sql, total)
         conn.commit()
     except Exception as e:
@@ -196,25 +195,32 @@ def SearchHotComment(page):
             pass
         pid=pid+1
     return
-class threadsearch(threading.Thread):
-    def __init__(self,que):
-        threading.Thread.__init__(self)
-        self.que = que
-    def run(self):
-        while True:
-            if not self.que.empty():
-                id=self.que.get()
-                SearchComment(id)
-            else:
-                break
+def get_range():
+    last=int(open("last.txt").read())
+    try:
+        url = "http://api.ithome.com/json/newslist/news"
+        result = requests.get(url).json()
+        latest=result["newslist"][0]["newsid"]
+    except Exception as e:
+        with open("error.log", "a") as fd:
+            fd.write("{} 获取最新文章列表错误:{}\n".format(gettime(),e))
+        latest=last
+    return (last,latest)
 if __name__=='__main__':
+    if not os.path.exists("last.txt"):
+        with open("last.txt","w") as fd:
+            fd.write(221111)
     queue=[]
-    for i in range(366293,383449):#这里改成你要爬的文章范围，从网页的url上获取
+    (last, latest)=get_range()
+    with open("record.log", "a") as fd:
+        fd.write("{} 正在爬取文章范围:{}-{}\n".format(gettime(), last,latest))
+    for i in range(last,latest):
         queue.append(i)
-    pool = threadpool.ThreadPool(8)#使用的线程数，推荐默认值
+    pool = threadpool.ThreadPool(4)#使用的线程数，推荐默认值
     request = threadpool.makeRequests(SearchComment, queue)
     [pool.putRequest(req) for req in request]
     pool.wait()
-    # for page in queue:
-    #     print("{}-{}".format(gettime(),page))
-    #     SearchComment(page)
+    with open("record.log", "a") as fd:
+        fd.write("{} 已完成，保存的下次文章的起始号码为:{}\n".format(gettime(),latest))
+    with open("last.txt", "w") as fd:
+        fd.write(str(latest))
